@@ -175,13 +175,16 @@ export const textToKeywordObj: MapLike<KeywordSyntaxKind> = {
     keyof: SyntaxKind.KeyOfKeyword,
     let: SyntaxKind.LetKeyword,
     module: SyntaxKind.ModuleKeyword,
+    package: SyntaxKind.PackageKeyword,
     namespace: SyntaxKind.NamespaceKeyword,
+
     never: SyntaxKind.NeverKeyword,
     new: SyntaxKind.NewKeyword,
     null: SyntaxKind.NullKeyword,
     number: SyntaxKind.NumberKeyword,
     object: SyntaxKind.ObjectKeyword,
-    package: SyntaxKind.PackageKeyword,
+    //package: SyntaxKind.PackageKeyword,
+
     private: SyntaxKind.PrivateKeyword,
     protected: SyntaxKind.ProtectedKeyword,
     public: SyntaxKind.PublicKeyword,
@@ -2394,9 +2397,13 @@ export function createScanner(
                 return false;
         }
 
-        if (scriptKind !== ScriptKind.TS && scriptKind !== ScriptKind.TSX) {
-            // If outside of TS, we need JSDoc to get any type info.
-            return true;
+        switch (scriptKind)
+        {
+            case ScriptKind.TS:
+            case ScriptKind.TSX:
+                break;
+            default:
+                return true;
         }
 
         if (jsDocParsingMode === JSDocParsingMode.ParseForTypeInfo) {
@@ -2422,6 +2429,12 @@ export function createScanner(
     }
 
     function scanIdentifier(startCharacter: number, languageVersion: ScriptTarget) {
+        return scanIdentifierToken(startCharacter, languageVersion)?.kind;
+    }
+
+    function scanIdentifierToken(startCharacter: number, languageVersion: ScriptTarget, identifier: string | undefined = undefined): {
+        kind: SyntaxKind, text: string
+    } | undefined {
         let ch = startCharacter;
         if (isIdentifierStart(ch, languageVersion)) {
             pos += charSize(ch);
@@ -2430,7 +2443,65 @@ export function createScanner(
             if (ch === CharacterCodes.backslash) {
                 tokenValue += scanIdentifierParts();
             }
-            return getIdentifierToken();
+            if (identifier === undefined && tokenValue.startsWith("package"))
+            {
+                let keepGoing = true;
+                while (keepGoing)
+                {
+                    switch (ch = codePointUnchecked(pos))
+                    {
+                    case CharacterCodes.tab:
+                    case CharacterCodes.verticalTab:
+                    case CharacterCodes.formFeed:
+                    case CharacterCodes.space:
+                    case CharacterCodes.nonBreakingSpace:
+                    case CharacterCodes.ogham:
+                    case CharacterCodes.enQuad:
+                    case CharacterCodes.emQuad:
+                    case CharacterCodes.enSpace:
+                    case CharacterCodes.emSpace:
+                    case CharacterCodes.threePerEmSpace:
+                    case CharacterCodes.fourPerEmSpace:
+                    case CharacterCodes.sixPerEmSpace:
+                    case CharacterCodes.figureSpace:
+                    case CharacterCodes.punctuationSpace:
+                    case CharacterCodes.thinSpace:
+                    case CharacterCodes.hairSpace:
+                    case CharacterCodes.zeroWidthSpace:
+                    case CharacterCodes.narrowNoBreakSpace:
+                    case CharacterCodes.mathematicalSpace:
+                    case CharacterCodes.ideographicSpace:
+                    case CharacterCodes.byteOrderMark:
+                        pos += charSize(ch);
+                        break;
+                    default:
+                        if (isIdentifierStart(ch, languageVersion))
+                        {
+                            tokenValue = "";
+                            tokenStart = pos;
+                            identifier = scanIdentifierToken(ch, languageVersion, "")?.text;
+                        }
+                        keepGoing = false;
+                        break;
+                    }
+                }
+
+                return { kind: SyntaxKind.PackageKeyword, text: identifier ?? "package" };
+            }
+            else if (identifier !== undefined)
+            {
+                if (identifier.endsWith('.'))
+                {
+                    return { kind: SyntaxKind.PackageKeyword, text: identifier + tokenValue };
+                }
+                if ((ch = codePointUnchecked(pos)) === CharacterCodes.dot)
+                {
+                    pos += charSize(ch);
+                    ch = codePointUnchecked(pos);
+                    return scanIdentifierToken(ch, languageVersion, identifier + '.') ?? { kind: SyntaxKind.PackageKeyword, text: identifier };
+                }
+            }
+            return { kind: getIdentifierToken(), text: tokenValue };
         }
     }
 
@@ -3912,13 +3983,15 @@ export function createScanner(
                 return token = SyntaxKind.Unknown;
         }
 
-        if (isIdentifierStart(ch, languageVersion)) {
+        if (isIdentifierStart(ch, languageVersion))
+        {
             let char = ch;
             while (pos < end && isIdentifierPart(char = codePointUnchecked(pos), languageVersion) || char === CharacterCodes.minus) pos += charSize(char);
             tokenValue = text.substring(tokenStart, pos);
             if (char === CharacterCodes.backslash) {
                 tokenValue += scanIdentifierParts();
             }
+
             return token = getIdentifierToken();
         }
         else {
